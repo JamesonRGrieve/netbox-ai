@@ -11,7 +11,8 @@ Semaphore-driven renderer reads to deploy **vLLM / SGLang / Ollama / ComfyUI** a
 - the running inference server is a [`netbox-services`](../netbox-services) **`ServiceInstance`**
   (`InferenceDeployment` FKs it);
 - the host is a [`netbox-guests`](../netbox-guests) guest VM or a `dcim.Device`;
-- the GPU card is a `netbox-inventory` asset (a thin `GpuDevice` references it).
+- the GPU card is a core `dcim` hardware record — `GpuDevice` references it and **derives VRAM**
+  from the `gpu` module-type profile (`netbox-inventory` is optional, for asset/ownership only).
 
 It adds the one thing nothing else models: **VRAM-aware model→GPU placement with tensor/pipeline
 parallelism + validation** (NetBox is the SoT + validator; an external planner decides placement).

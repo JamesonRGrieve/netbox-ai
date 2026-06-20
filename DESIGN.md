@@ -13,7 +13,8 @@ scripts (`install-*.sh`, `deploy-gigabyte-*.sh`, `modelfiles/{desktop,gigabyte,l
 `netbox-ai` is the **GPU-placement layer**. It does **not** re-model the running server or the GPU
 card — it **composes**: an inference backend is a [`netbox-services`](../netbox-services/DESIGN.md)
 **`ServiceInstance`**, its host is a [`netbox-guests`](../netbox-guests/DESIGN.md) guest VM or a
-`dcim.Device`, and the GPU is a `netbox-inventory` hardware item. `netbox-ai` adds the one thing
+`dcim.Device`, and the GPU is a core `dcim` hardware record (with `netbox-inventory` as the
+*optional* asset layer). `netbox-ai` adds the one thing
 nothing else models: **VRAM-aware model→GPU placement with parallelism + validation.**
 
 That composition is a **hard dependency**, not loose coupling: `InferenceDeployment` FKs
@@ -31,8 +32,8 @@ via `ServiceInstance.parent`.)
 |---|------|----------|
 | 1 | Scope | **GPU-placement layer only** — model catalog + GPU/VRAM allocation + placement/parallelism + gateway routing. Not a monolithic "AI plugin" that re-implements services/inventory. |
 | 2 | Inference server instance | **Lives in `netbox-services` as a `ServiceInstance`** (vLLM/SGLang/Ollama/ComfyUI are apps with installs). `netbox-ai.InferenceDeployment` **FK → `ServiceInstance`** (required, not nullable — no bare-VM shortcut) and adds the model + GPU placement. *(operator decision — "it will reference ServiceInstance")* |
-| 2a | Dependency posture | **`netbox-services` is a hard dependency** — `required_plugins=["netbox_services"]` (the FK makes it mandatory; netbox-ai won't load without it), the `netbox-load-balancing-acl → netbox_load_balancing` pattern. **`netbox-inventory` optional** (GpuDevice stands on `dcim.Device`; inventory link is enrichment). **`netbox-guests` transitive** (via `ServiceInstance.parent`; no direct FK). |
-| 3 | GPU hardware | **`netbox-inventory`** owns the card (the `gpu` module-type profile, `netbox-modeling.md §5`). `netbox-ai` adds a thin **`GpuDevice`** logical view (host + index + VRAM) that references it — does not duplicate the asset. |
+| 2a | Dependency posture | **`netbox-services` is a hard dependency** — `required_plugins=["netbox_services"]` (the FK makes it mandatory; netbox-ai won't load without it), the `netbox-load-balancing-acl → netbox_load_balancing` pattern. **`netbox-inventory` optional** (GpuDevice references the core-dcim GPU record; netbox-inventory adds asset/ownership only). **`netbox-guests` transitive** (via `ServiceInstance.parent`; no direct FK). |
+| 3 | GPU hardware | **Core `dcim` owns the canonical GPU record** — a `Module` carrying the `gpu` module-type profile (or an `InventoryItem`). `GpuDevice` references it and **derives VRAM** from the profile (no stored copy → no drift). `netbox-inventory` is the **optional** asset/ownership layer on the same record, **not** required. *(decision 2026-06-19)* |
 | 4 | Role of NetBox | **SoT + validator, not a scheduler.** NetBox stores the *chosen* plan and enforces constraints (`clean()`); the optimizer that *decides* placement is external (the `ollama_sweep.py`-style planner) and writes intent into NetBox. |
 | 5 | Telemetry | **Out — monitoring, not NetBox.** NetBox holds *planned* VRAM budget + footprint estimates; live utilization / tok·s⁻¹ / actual VRAM stay in monitoring (`netbox-modeling.md §1`). |
 | 6 | Model weights | **Out — object store / HF / Ollama registry.** The catalog holds a *reference* (repo / tag / size), never the blob. |
@@ -71,7 +72,8 @@ parallelism**, or **gateway routing** as NetBox data. That is this plugin.
 | Placement / config intent (model, quant, GPU set, TP/PP, ctx, gpu-mem-util, route) | **NetBox** (`netbox-ai`) | authoritative |
 | Running server (vLLM/Ollama/SGLang/ComfyUI process + install) | **NetBox** (`netbox-services` `ServiceInstance`) | referenced (FK) |
 | Host (guest/bare-metal) | **NetBox** (`netbox-guests` VM \| `dcim.Device`) | referenced (via ServiceInstance.parent) |
-| GPU hardware (card, VRAM size, PCI) | **NetBox** (`netbox-inventory` gpu profile) | referenced (GpuDevice → inventory) |
+| GPU hardware (card, VRAM size, PCI) | **NetBox** (core `dcim` — `Module` + `gpu` module-type profile) | referenced; VRAM **derived** from the profile (GpuDevice → dcim) |
+| GPU asset / ownership (serial, purchase, ERPNext) | **NetBox** (`netbox-inventory`, *optional*) + ERPNext | optional enrichment on the same hardware record |
 | Secrets (HF tokens, gateway API keys, model EULA creds) | **OpenBao** | path/ref only |
 | Telemetry (GPU util, tok·s⁻¹, live VRAM, queue depth) | **monitoring** | not stored |
 | Weights / LoRAs / ComfyUI graphs | **object store / HF / registry** | reference only |
@@ -97,10 +99,13 @@ weights), `license`, `default_context`, `max_context`, `tags`.
 `FK→ModelCatalog, quant` (fp16 / q8_0 / q4_K_M / awq / gptq / fp8 …), `weights_vram_gb` (declared
 estimate), `recommended_context`. The thing `MODEL_TUNING.md` / the VRAM-budget tiers encode today.
 
-### GpuDevice  *(thin logical GPU — references the netbox-inventory card)*
-`FK→dcim.Device` (host), `index` (GPU0/GPU1 …), `vram_total_gb`, optional `inventory_item` link to
-the `netbox-inventory` gpu profile, `interconnect_group` (NVLink/PCIe peer set for TP eligibility).
-Unique per `(device, index)`. *Reserved* VRAM is **derived** (sum of placements), never stored.
+### GpuDevice  *(thin serving view — references the GPU's canonical core-dcim hardware record)*
+`FK→dcim.Device` (host), `index` (GPU0/GPU1 …), **`FK→dcim` GPU record** (a `Module` carrying the
+`gpu` module-type profile, or an `InventoryItem`) — **`vram_total_gb` is derived from that record's
+profile, not stored**; a nullable `vram_total_gb_override` covers a card not yet in dcim.
+`interconnect_group` (NVLink/PCIe peer set for TP eligibility). Unique per `(device, index)`.
+*Reserved* VRAM is **derived** (Σ placements), never stored. An optional `netbox-inventory` Asset
+on the same record adds ownership/ERPNext — enrichment, not a dependency.
 
 ### InferenceDeployment  *(the placement — the row the renderer reads)*
 `FK→netbox_services.ServiceInstance` (the running backend), `FK→ModelVariant`, `gpus` (M2M→GpuDevice),
@@ -185,8 +190,10 @@ not a NetBox field.
   the single-host case is 0-diff.
 - **`extra_args` escape hatch** — bound it; ratchet long-tail backend args into typed fields, don't let
   it regress to a blob.
-- **GpuDevice vs netbox-inventory** — confirm the inventory `gpu` profile carries per-slot index + VRAM,
-  or whether `GpuDevice` must hold them; reference, don't duplicate the asset.
+- **GpuDevice VRAM derivation** — resolved (2026-06-19): VRAM is derived from the core-dcim `gpu`
+  module-type profile; `GpuDevice` holds only the serving `index` + `interconnect_group` (+ a nullable
+  `vram_total_gb_override` for a card not yet in dcim). Verify the running NetBox's `gpu` profile schema
+  actually carries a VRAM attribute.
 
 ---
 
