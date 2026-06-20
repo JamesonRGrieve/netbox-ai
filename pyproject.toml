@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netbox-ai"
+version = "0.0.1"
+description = "Native NetBox source of truth for AI/LLM deployment intent — model catalog + VRAM-aware GPU placement + gateway routing"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "Jameson" }]
+keywords = ["netbox", "netbox-plugin", "ai", "llm", "gpu", "vllm", "inference", "iac"]
+classifiers = [
+    "Framework :: Django",
+    "Programming Language :: Python :: 3",
+]
+dependencies = ["netbox-services"]
+
+[project.urls]
+Repository = "https://github.com/JamesonRGrieve/netbox-ai"
+
+[tool.setuptools.packages.find]
+include = ["netbox_ai*"]
+
+[tool.black]
+line-length = 100
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "netbox.settings"
+python_files = ["test_*.py"]
+addopts = "-v"

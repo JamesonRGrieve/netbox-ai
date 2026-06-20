@@ -20,7 +20,22 @@ parallelism + validation** (NetBox is the SoT + validator; an external planner d
 **Secret policy:** HF tokens and gateway API keys are OpenBao path references, never stored. Live
 GPU telemetry is monitoring's job, not NetBox's; model weights live in the registry/object store.
 
-**Status:** design only. See **[DESIGN.md](DESIGN.md)** — data model (`ModelCatalog`/`ModelVariant`,
-`GpuDevice`, `InferenceDeployment`, `GatewayRoute`), the SoT boundary, placement/validation rules, and
-build sequence. Pairs with the sibling [`netbox-services`](../netbox-services) and
-[`netbox-guests`](../netbox-guests).
+**Status:** implemented (NetBox 4.6 plugin, `netbox_ai`). Models — `ModelCatalog` / `ModelVariant`
+(model SoT), `GpuDevice` (derives VRAM from the core-dcim `gpu` profile), `InferenceDeployment`
+(VRAM-aware model→GPU placement with TP/PP + validation), `GatewayRoute` / `GatewayRouteTarget`
+(bifrost routing). Full REST + UI + filtersets + tests, mirroring the sibling
+[`netbox-services`](../netbox-services). Requires `netbox-services` (declared
+`required_plugins`). See **[DESIGN.md](DESIGN.md)** for the decision record and the SoT boundary, and
+**[CLAUDE.md](CLAUDE.md)** for the agent operating guide + verification still owed on a live NetBox.
+
+### Install
+
+```bash
+pip install -e .            # pulls netbox-services
+# enable in netbox configuration.py:  PLUGINS = ["netbox_services", "netbox_ai"]
+python manage.py migrate netbox_ai
+```
+
+Optional `PLUGINS_CONFIG["netbox_ai"]` settings (defaults shown): `vram_headroom` (`0.9`),
+`kv_cache_gb_per_1k_tokens` (`0.5`), `vram_overhead_gb` (`1.0`), `gpu_vram_attribute` (`"vram_gb"` —
+set to the live netbox-inventory `gpu` profile's VRAM attribute name).
