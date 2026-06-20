@@ -16,6 +16,13 @@ card — it **composes**: an inference backend is a [`netbox-services`](../netbo
 `dcim.Device`, and the GPU is a `netbox-inventory` hardware item. `netbox-ai` adds the one thing
 nothing else models: **VRAM-aware model→GPU placement with parallelism + validation.**
 
+That composition is a **hard dependency**, not loose coupling: `InferenceDeployment` FKs
+`netbox_services.ServiceInstance`, so `netbox-ai` declares
+**`PluginConfig.required_plugins = ["netbox_services"]`** and won't load without it — exactly as
+`netbox-load-balancing-acl` declares `required_plugins=["netbox_load_balancing"]` and FKs its
+`Listener`/`Pool`. (`netbox-inventory` stays *optional* enrichment; `netbox-guests` is *transitive*
+via `ServiceInstance.parent`.)
+
 ---
 
 ## 0. Decisions of record (2026-06-19)
@@ -23,7 +30,8 @@ nothing else models: **VRAM-aware model→GPU placement with parallelism + valid
 | # | Item | Decision |
 |---|------|----------|
 | 1 | Scope | **GPU-placement layer only** — model catalog + GPU/VRAM allocation + placement/parallelism + gateway routing. Not a monolithic "AI plugin" that re-implements services/inventory. |
-| 2 | Inference server instance | **Lives in `netbox-services` as a `ServiceInstance`** (vLLM/SGLang/Ollama/ComfyUI are apps with installs). `netbox-ai.InferenceDeployment` **FK → `ServiceInstance`** and adds the model + GPU placement. *(operator decision — "it will reference ServiceInstance")* |
+| 2 | Inference server instance | **Lives in `netbox-services` as a `ServiceInstance`** (vLLM/SGLang/Ollama/ComfyUI are apps with installs). `netbox-ai.InferenceDeployment` **FK → `ServiceInstance`** (required, not nullable — no bare-VM shortcut) and adds the model + GPU placement. *(operator decision — "it will reference ServiceInstance")* |
+| 2a | Dependency posture | **`netbox-services` is a hard dependency** — `required_plugins=["netbox_services"]` (the FK makes it mandatory; netbox-ai won't load without it), the `netbox-load-balancing-acl → netbox_load_balancing` pattern. **`netbox-inventory` optional** (GpuDevice stands on `dcim.Device`; inventory link is enrichment). **`netbox-guests` transitive** (via `ServiceInstance.parent`; no direct FK). |
 | 3 | GPU hardware | **`netbox-inventory`** owns the card (the `gpu` module-type profile, `netbox-modeling.md §5`). `netbox-ai` adds a thin **`GpuDevice`** logical view (host + index + VRAM) that references it — does not duplicate the asset. |
 | 4 | Role of NetBox | **SoT + validator, not a scheduler.** NetBox stores the *chosen* plan and enforces constraints (`clean()`); the optimizer that *decides* placement is external (the `ollama_sweep.py`-style planner) and writes intent into NetBox. |
 | 5 | Telemetry | **Out — monitoring, not NetBox.** NetBox holds *planned* VRAM budget + footprint estimates; live utilization / tok·s⁻¹ / actual VRAM stay in monitoring (`netbox-modeling.md §1`). |
@@ -74,6 +82,10 @@ parallelism**, or **gateway routing** as NetBox data. That is this plugin.
 
 All models are native `NetBoxModel`s (custom fields, tags, journaling, GraphQL for free), mirroring
 the `netbox-system-services` layout. No `config_context`, no CustomField-as-data-blob.
+**`PluginConfig.required_plugins = ["netbox_services"]`** — the FKs below to
+`netbox_services.ServiceInstance` are required (not nullable), so the dependency is declared and
+fails fast at startup (the `netbox-load-balancing-acl` pattern). The plugin migration depends on
+`netbox_services`'s latest migration so the target table exists.
 
 ### ModelCatalog  *(template — the model SoT; seeded from `ai-lab/modelfiles/*`)*
 `name, display_name, description, architecture` (llama / qwen3 / gemma3 / gemma4-moe / flux …),
