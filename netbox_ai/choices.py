@@ -42,9 +42,14 @@ class QuantizationChoices(ChoiceSet):
     BF16 = "bf16"
     FP8 = "fp8"
     Q8_0 = "q8_0"
+    Q6_K_L = "q6_k_l"
     Q6_K = "q6_k"
     Q5_K_M = "q5_k_m"
+    Q4_K_XL = "q4_k_xl"
     Q4_K_M = "q4_k_m"
+    IQ4_XS = "iq4_xs"
+    Q4_0 = "q4_0"
+    Q3_K_M = "q3_k_m"
     AWQ = "awq"
     GPTQ = "gptq"
     CHOICES = [
@@ -52,9 +57,14 @@ class QuantizationChoices(ChoiceSet):
         (BF16, "BF16", "red"),
         (FP8, "FP8", "orange"),
         (Q8_0, "Q8_0", "orange"),
+        (Q6_K_L, "Q6_K_L", "yellow"),
         (Q6_K, "Q6_K", "yellow"),
         (Q5_K_M, "Q5_K_M", "yellow"),
+        (Q4_K_XL, "Q4_K_XL", "green"),
         (Q4_K_M, "Q4_K_M", "green"),
+        (IQ4_XS, "IQ4_XS", "green"),
+        (Q4_0, "Q4_0", "green"),
+        (Q3_K_M, "Q3_K_M", "gray"),
         (AWQ, "AWQ", "purple"),
         (GPTQ, "GPTQ", "purple"),
     ]
